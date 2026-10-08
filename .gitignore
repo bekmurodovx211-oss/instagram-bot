@@ -1,6 +1,10 @@
 # Maxfiy ma'lumotlar va tokenlar
 .env
 
+# Ma'lumotlar bazasi fayllari
+*.db
+*.sqlite3
+
 # Vaqtinchalik yuklab olingan fayllar
 downloads/
 *.mp4
