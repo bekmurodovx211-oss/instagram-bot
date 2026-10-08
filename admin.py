@@ -38,8 +38,17 @@ def is_admin(user_id: int) -> bool:
 @admin_router.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext) -> None:
     """Admin panelini ochish."""
-    if not is_admin(message.from_user.id):
-        # Admin bo'lmasa javob bermaymiz
+    user_id = message.from_user.id if message.from_user else 0
+
+    if not is_admin(user_id):
+        # Admin bo'lmagan foydalanuvchiga o'z ID sini aniq ko'rsatamiz
+        await message.answer(
+            "⛔ <b>Kechirasiz, siz bot administratori emassiz!</b>\n\n"
+            f"🆔 <b>Sizning Telegram ID raqamingiz:</b> <code>{user_id}</code>\n\n"
+            "⚙️ <b>Admin bo'lish uchun:</b>\n"
+            "Render.com dagi (yoki .env faylidagi) <b>ADMIN_ID</b> parametriga yuqoridagi ID raqamingizni kiriting va saqlang:\n"
+            f"<code>ADMIN_ID={user_id}</code>"
+        )
         return
 
     await state.clear()
@@ -109,7 +118,6 @@ async def process_broadcast_message(message: Message, state: FSMContext) -> None
     if not is_admin(message.from_user.id):
         return
 
-    # Xabar ID sini saqlaymiz
     await state.update_data(broadcast_message_id=message.message_id)
     await state.set_state(AdminStates.confirm_broadcast)
 
@@ -157,7 +165,6 @@ async def cb_confirm_broadcast(callback: CallbackQuery, state: FSMContext, bot: 
                 message_id=msg_id
             )
             success_count += 1
-            # Telegram chekloviga tushmaslik uchun kichik tanaffus
             await asyncio.sleep(0.04)
         except Exception:
             fail_count += 1

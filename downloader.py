@@ -5,7 +5,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
 import yt_dlp
-from config import DOWNLOAD_DIR
+from config import DOWNLOAD_DIR, BASE_DIR
 
 INSTAGRAM_REGEX = re.compile(
     r"(https?://(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/[A-Za-z0-9_-]+/?(?:\?[^\s]*)?)",
@@ -26,40 +26,55 @@ class DownloadResult:
     error: Optional[str] = None
 
 def extract_supported_url(text: str) -> Optional[Tuple[str, str]]:
-    """
-    Matn ichidan Instagram yoki YouTube havolasini ajratib oladi.
-    Qaytaradi: (toza_url, platforma_nomi) yoki None
-    """
+    """Matn ichidan Instagram yoki YouTube havolasini ajratib oladi."""
     if not text:
         return None
     
-    # Instagram tekshiruvi
     ig_match = INSTAGRAM_REGEX.search(text)
     if ig_match:
         url = ig_match.group(1).split("?")[0]
         return url, "Instagram"
         
-    # YouTube tekshiruvi
     yt_match = YOUTUBE_REGEX.search(text)
     if yt_match:
-        url = yt_match.group(1).split("&")[0]  # Ortiqcha parametrlarni qirqish
+        url = yt_match.group(1).split("&")[0]
         return url, "YouTube"
 
     return None
 
-def _download_video_sync(url: str) -> DownloadResult:
-    """Sinxron tarzda video yuklab olish (Instagram yoki YouTube)."""
-    file_prefix = uuid.uuid4().hex[:8]
-    output_template = str(DOWNLOAD_DIR / f"{file_prefix}_%(id)s.%(ext)s")
-
-    ydl_opts = {
+def _get_base_ydl_opts(output_template: str, is_audio: bool = False) -> dict:
+    """yt-dlp sozlamalari (YouTube bot himoyasini aylanib o'tish bilan)."""
+    opts = {
         'outtmpl': output_template,
-        'format': 'best[filesize<50M][ext=mp4]/best[ext=mp4]/best[filesize<50M]/best',
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'max_filesize': 50 * 1024 * 1024,  # Telegram bot limiti 50 MB
+        'max_filesize': 50 * 1024 * 1024,
+        # YouTube bot va cloud IP blokirovkasini aylanib o'tish (Android & iOS mijozlari orqali)
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios']
+            }
+        }
     }
+
+    if is_audio:
+        opts['format'] = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
+    else:
+        opts['format'] = 'best[filesize<50M][ext=mp4]/best[ext=mp4]/best[filesize<50M]/best'
+
+    # Agar cookies.txt mavjud bo'lsa, undan foydalanamiz
+    cookies_path = BASE_DIR / "cookies.txt"
+    if cookies_path.exists():
+        opts['cookiefile'] = str(cookies_path)
+
+    return opts
+
+def _download_video_sync(url: str) -> DownloadResult:
+    """Sinxron tarzda video yuklab olish."""
+    file_prefix = uuid.uuid4().hex[:8]
+    output_template = str(DOWNLOAD_DIR / f"{file_prefix}_%(id)s.%(ext)s")
+    ydl_opts = _get_base_ydl_opts(output_template, is_audio=False)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -68,7 +83,7 @@ def _download_video_sync(url: str) -> DownloadResult:
                 return DownloadResult(
                     success=False,
                     file_paths=[],
-                    error="Ma'lumot topilmadi yoki post mavjud emas."
+                    error="Ma'lumot topilmadi yoki video mavjud emas."
                 )
 
             downloaded_files = []
@@ -91,7 +106,7 @@ def _download_video_sync(url: str) -> DownloadResult:
                 return DownloadResult(
                     success=False,
                     file_paths=[],
-                    error="Faylni yuklab olishda xatolik yuz berdi."
+                    error="Faylni saqlashda xatolik yuz berdi."
                 )
 
             title = info.get('title') or info.get('description') or ""
@@ -106,24 +121,30 @@ def _download_video_sync(url: str) -> DownloadResult:
             )
 
     except yt_dlp.utils.DownloadError as e:
-        err_msg = str(e)
-        if "login" in err_msg.lower() or "private" in err_msg.lower():
+        err_msg = str(e).lower()
+        if "sign in" in err_msg or "confirm you're not a bot" in err_msg:
             return DownloadResult(
                 success=False,
                 file_paths=[],
-                error="Ushbu akkaunt yopiq (private) yoki kirish talab qilinmoqda."
+                error="YouTube ushbu videoga kirish uchun tasdiqlashni talab qildi (yosh chegarasi yoki avtorizatsiya talabi)."
             )
-        elif "max-filesize" in err_msg.lower() or "too large" in err_msg.lower():
+        elif "login" in err_msg or "private" in err_msg:
             return DownloadResult(
                 success=False,
                 file_paths=[],
-                error="Video hajmi 50 MB dan katta bo'lgani sababli bot uni yubora olmaydi."
+                error="Ushbu akkaunt yopiq (private) yoki video maxfiy."
+            )
+        elif "max-filesize" in err_msg or "too large" in err_msg:
+            return DownloadResult(
+                success=False,
+                file_paths=[],
+                error="Video hajmi 50 MB dan katta bo'lgani sababli Telegram orqali yuborib bo'lmaydi."
             )
         else:
             return DownloadResult(
                 success=False,
                 file_paths=[],
-                error="Videoni yuklab bo'lmadi. Havola to'g'riligini yoki cheklov yo'qligini tekshiring."
+                error="Videoni yuklab bo'lmadi. Havola to'g'riligini tekshiring."
             )
     except Exception as e:
         return DownloadResult(
@@ -133,18 +154,10 @@ def _download_video_sync(url: str) -> DownloadResult:
         )
 
 def _download_audio_sync(url: str) -> DownloadResult:
-    """Sinxron tarzda faqat audio/musiqani ajratib yuklab olish."""
+    """Sinxron tarzda audio/musiqa yuklab olish."""
     file_prefix = f"audio_{uuid.uuid4().hex[:8]}"
     output_template = str(DOWNLOAD_DIR / f"{file_prefix}_%(id)s.%(ext)s")
-
-    ydl_opts = {
-        'outtmpl': output_template,
-        'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'max_filesize': 50 * 1024 * 1024,
-    }
+    ydl_opts = _get_base_ydl_opts(output_template, is_audio=True)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -202,5 +215,5 @@ async def download_media_video(url: str) -> DownloadResult:
     return await asyncio.to_thread(_download_video_sync, url)
 
 async def download_media_audio(url: str) -> DownloadResult:
-    """Asinxron audio/musiqa yuklab olish."""
+    """Asinxron audio yuklab olish."""
     return await asyncio.to_thread(_download_audio_sync, url)
