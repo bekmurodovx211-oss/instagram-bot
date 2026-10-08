@@ -4,6 +4,7 @@ import logging
 import asyncio
 from pathlib import Path
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
@@ -22,6 +23,27 @@ logger = logging.getLogger(__name__)
 
 dp = Dispatcher()
 
+# --- UptimeRobot va Render uchun Web Server (Port 8080/10000) ---
+async def handle_ping(request: web.Request) -> web.Response:
+    """UptimeRobot ping yuborganda 200 OK qaytaradi."""
+    return web.Response(text="Bot is running! Status: OK 🚀", status=200)
+
+async def start_web_server() -> None:
+    """Render va UptimeRobot boti uxlab qolmasligi uchun HTTP server."""
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    app.router.add_get("/health", handle_ping)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    # Render PORT muhit o'zgaruvchisini beradi (odatda 10000)
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"UptimeRobot & Render HTTP serveri {port}-portda ishga tushirildi.")
+
+# --- Telegram Bot Handlerlari ---
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     """/start komandasi uchun handler."""
@@ -124,6 +146,10 @@ async def main() -> None:
         )
         sys.exit(1)
 
+    # 1. Render va UptimeRobot uchun veb serverni ishga tushiramiz
+    await start_web_server()
+
+    # 2. Telegram botni ishga tushiramiz
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
