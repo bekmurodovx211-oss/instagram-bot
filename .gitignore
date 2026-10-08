@@ -1,0 +1,28 @@
+# Maxfiy ma'lumotlar va tokenlar
+.env
+
+# Vaqtinchalik yuklab olingan fayllar
+downloads/
+*.mp4
+*.m4a
+*.webm
+*.jpg
+*.png
+
+# Python kesh fayllari
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual muhit (Virtual environment)
+.venv/
+venv/
+ENV/
+env/
+
+# IDE va muhit sozlamalari
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
